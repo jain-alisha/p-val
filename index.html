@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>p-Value Intuition Simulator</title>
+
+    <!-- Inter font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+
+  <body class="bg-gradient-to-b from-sky-50 to-white dark:from-zinc-950 dark:to-zinc-900 dark:text-zinc-100">
+    <div id="app"></div>
+
+    <!-- Dark-mode toggle -->
+    <button
+      id="theme"
+      class="fixed bottom-4 right-4 h-10 w-10 grid place-items-center rounded-full
+             bg-zinc-900 text-zinc-100 shadow-lg ring-1 ring-black/10 hover:opacity-90"
+      title="Toggle dark mode"
+      aria-label="Toggle dark mode"
+    >
+      ☾
+    </button>
+    <script>
+      const root = document.documentElement;
+      document.getElementById('theme').onclick = () => root.classList.toggle('dark');
+    </script>
+
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
