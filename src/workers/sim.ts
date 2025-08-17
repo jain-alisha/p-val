@@ -1,21 +1,24 @@
-import { randomNormal, tTestTwoSample } from '../utils/stats';
+/// <reference lib="webworker" />
 
-interface Message {
-  delta: number;
-  sigma: number;
-  n: number;
-  trials: number;
-}
+import { tTestTwoSample, randomNormal } from "../utils/stats";
 
-self.onmessage = ({ data }: MessageEvent<Message>) => {
-  const { delta, sigma, n, trials } = data;
+type InMsg = { delta: number; sigma: number; n: number; trials: number };
+type OutMsg = { pValues: number[] };
+
+const ctx: DedicatedWorkerGlobalScope = self as unknown as DedicatedWorkerGlobalScope;
+
+ctx.onmessage = (evt: MessageEvent<InMsg>) => {
+  const { delta, sigma, n, trials } = evt.data;
+
   const pValues: number[] = [];
-
-  for (let t = 0; t < trials; t++) {
-    const x = Array.from({ length: n }, () => randomNormal(0, sigma));
-    const y = Array.from({ length: n }, () => randomNormal(delta, sigma));
-    pValues.push(tTestTwoSample(x, y));
+  for (let i = 0; i < trials; i++) {
+    const a = Array.from({ length: n }, () => randomNormal(0, sigma));
+    const b = Array.from({ length: n }, () => randomNormal(delta, sigma));
+    pValues.push(tTestTwoSample(a, b));
   }
 
-  (self as DedicatedWorkerGlobalScope).postMessage(pValues);
+  ctx.postMessage({ pValues } as OutMsg);
 };
+
+// make this a module to avoid global scope conflicts
+export {};
