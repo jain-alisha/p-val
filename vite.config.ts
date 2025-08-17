@@ -1,12 +1,9 @@
 // vite.config.ts
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
 
+// IMPORTANT: base must match the repo name for GitHub Pages
 export default defineConfig({
+  base: "/p-val/",
   plugins: [react()],
-<<<<<<< HEAD
-  base: '/p-value-simulator/',  // 👈 match your remote repo name
-=======
-  base: '/p-val/',   
->>>>>>> 8775a59 (chore: set base to /p-val/ and add Pages workflow)
 });
