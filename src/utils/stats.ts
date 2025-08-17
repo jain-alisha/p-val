@@ -1,18 +1,120 @@
 // src/utils/stats.ts
+import * as ss from "simple-statistics";
 
-/* --------------------------------------------------------------- */
-/* Small numeric helpers (no external deps)                        */
-/* --------------------------------------------------------------- */
-function mean(a: number[]): number {
-  return a.reduce((s, x) => s + x, 0) / a.length;
-}
-function sampleVariance(a: number[]): number {
-  const m = mean(a);
-  const sse = a.reduce((s, x) => s + (x - m) * (x - m), 0);
-  return sse / (a.length - 1);
+/* ------------------------------------------------------------------ */
+/*  Normal RNG (Box–Muller)                                           */
+/* ------------------------------------------------------------------ */
+export function randomNormal(mu = 0, sigma = 1): number {
+  return (
+    mu +
+    sigma *
+      Math.sqrt(-2 * Math.log(Math.random())) *
+      Math.cos(2 * Math.PI * Math.random())
+  );
 }
 
-/* log Γ(z) via Lanczos approximation */
+/* ------------------------------------------------------------------ */
+/*  Two-sample t test (equal variances, two-sided)                     */
+/*  Returns t, df, and p                                               */
+/* ------------------------------------------------------------------ */
+export function twoSampleP(
+  groupA: number[],
+  groupB: number[]
+): { t: number; df: number; p: number } {
+  const n1 = groupA.length;
+  const n2 = groupB.length;
+
+  const mean1 = ss.mean(groupA);
+  const mean2 = ss.mean(groupB);
+
+  const var1 = ss.variance(groupA);
+  const var2 = ss.variance(groupB);
+
+  // pooled variance (equal-variance assumption)
+  const df = n1 + n2 - 2;
+  const pooled = ((n1 - 1) * var1 + (n2 - 1) * var2) / df;
+  const se = Math.sqrt(pooled * (1 / n1 + 1 / n2));
+
+  const t = (mean1 - mean2) / se;
+
+  // two-sided p-value from Student-t(df) CDF
+  const cdf = studentTCdf(t, df);
+  const p = 2 * (1 - (t >= 0 ? cdf : 1 - cdf)); // symmetric
+
+  return { t, df, p };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Back-compat for older callers (e.g. worker): returns ONLY p        */
+/* ------------------------------------------------------------------ */
+export function tTestTwoSample(a: number[], b: number[]): number {
+  return twoSampleP(a, b).p;
+}
+
+/* ================================================================== */
+/*  Student-t CDF via regularized incomplete beta                      */
+/*  F(t; ν) = 1 - 0.5 * I_{ν/(ν+t^2)}(ν/2, 1/2) for t > 0; symmetric   */
+/* ================================================================== */
+function studentTCdf(t: number, v: number): number {
+  const x = v / (v + t * t);
+  const ib = regularizedIncompleteBeta(x, v / 2, 0.5);
+  if (t >= 0) return 1 - 0.5 * ib;
+  return 0.5 * ib;
+}
+
+/* ---------- Regularized incomplete beta I_x(a,b) ------------------- */
+function regularizedIncompleteBeta(x: number, a: number, b: number): number {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+
+  const bt =
+    Math.exp(
+      logGamma(a + b) - logGamma(a) - logGamma(b) + a * Math.log(x) + b * Math.log(1 - x)
+    );
+
+  const symm = x < (a + 1) / (a + b + 2);
+  const cf = betacf(symm ? x : 1 - x, a, b);
+  const result = symm ? (bt * cf) / a : 1 - (bt * cf) / b;
+  return result;
+}
+
+/* ---------- Continued fraction for incomplete beta ----------------- */
+function betacf(x: number, a: number, b: number): number {
+  const MAX_ITER = 200;
+  const EPS = 3e-7;
+
+  let am = 1;
+  let bm = 1;
+  let az = 1;
+  let qab = a + b;
+  let qap = a + 1;
+  let qam = a - 1;
+  let bz = 1 - (qab * x) / qap;
+
+  for (let m = 1, em = 1; m <= MAX_ITER; m++, em++) {
+    const tem = em + em;
+    // even step
+    let d = (em * (b - em) * x) / ((qam + tem) * (a + tem));
+    const ap = az + d * am;
+    const bp = bz + d * bm;
+
+    // odd step
+    d = -((a + em) * (qab + em) * x) / ((a + tem) * (qap + tem));
+    const app = ap + d * az;
+    const bpp = bp + d * bz;
+
+    const aold = az;
+    am = ap / bpp;
+    bm = bp / bpp;
+    az = app / bpp;
+    bz = 1;
+
+    if (Math.abs(az - aold) < EPS * Math.abs(az)) return az;
+  }
+  return az; // fallback
+}
+
+/* ---------- Lanczos log-gamma ------------------------------------- */
 function logGamma(z: number): number {
   const p = [
     676.5203681218851,
@@ -24,121 +126,13 @@ function logGamma(z: number): number {
     9.9843695780195716e-6,
     1.5056327351493116e-7,
   ];
+  const g = 7;
+  if (z < 0.5) {
+    return Math.log(Math.PI) - Math.log(Math.sin(Math.PI * z)) - logGamma(1 - z);
+  }
+  z -= 1;
   let x = 0.99999999999980993;
   for (let i = 0; i < p.length; i++) x += p[i] / (z + i + 1);
-  const t = z + p.length - 0.5;
-  return (
-    0.5 * Math.log(2 * Math.PI) +
-    (z + 0.5) * Math.log(t) -
-    t +
-    Math.log(x) -
-    Math.log(z)
-  );
-}
-
-/* continued fraction for incomplete beta (NR in C) */
-function betacf(a: number, b: number, x: number): number {
-  const MAXIT = 200;
-  const EPS = 3e-8;
-  const FPMIN = 1e-30;
-
-  let qab = a + b;
-  let qap = a + 1;
-  let qam = a - 1;
-  let c = 1;
-  let d = 1 - (qab * x) / qap;
-  if (Math.abs(d) < FPMIN) d = FPMIN;
-  d = 1 / d;
-  let h = d;
-
-  for (let m = 1; m <= MAXIT; m++) {
-    const m2 = 2 * m;
-
-    // even step
-    let aa = (m * (b - m) * x) / ((qam + m2) * (a + m2));
-    d = 1 + aa * d;
-    if (Math.abs(d) < FPMIN) d = FPMIN;
-    c = 1 + aa / c;
-    if (Math.abs(c) < FPMIN) c = FPMIN;
-    h *= d * c;
-
-    // odd step
-    aa = (-(a + m) * (qab + m) * x) / ((a + m2) * (qap + m2));
-    d = 1 + aa * d;
-    if (Math.abs(d) < FPMIN) d = FPMIN;
-    c = 1 + aa / c;
-    if (Math.abs(c) < FPMIN) c = FPMIN;
-    const del = d * c;
-    h *= del;
-
-    if (Math.abs(del - 1) < EPS) break;
-  }
-  return h;
-}
-
-/* regularized incomplete beta I_x(a,b) */
-function ibeta(x: number, a: number, b: number): number {
-  if (x <= 0) return 0;
-  if (x >= 1) return 1;
-
-  const bt =
-    Math.exp(
-      logGamma(a + b) - logGamma(a) - logGamma(b) + a * Math.log(x) + b * Math.log(1 - x)
-    );
-
-  if (x < (a + 1) / (a + b + 2)) {
-    return (bt * betacf(a, b, x)) / a;
-  } else {
-    return 1 - (bt * betacf(b, a, 1 - x)) / b;
-  }
-}
-
-/* Student's t CDF */
-function tCdf(t: number, v: number): number {
-  if (!isFinite(t)) return t > 0 ? 1 : 0;
-  if (v <= 0) return NaN;
-  if (t === 0) return 0.5;
-
-  const x = v / (v + t * t);
-  const a = v / 2;
-  const b = 0.5;
-  const I = ibeta(x, a, b);
-  return t > 0 ? 1 - 0.5 * I : 0.5 * I;
-}
-
-/* --------------------------------------------------------------- */
-/* Public API                                                      */
-/* --------------------------------------------------------------- */
-export function randomNormal(mu = 0, sigma = 1): number {
-  return (
-    mu +
-    sigma *
-      Math.sqrt(-2 * Math.log(Math.random())) *
-      Math.cos(2 * Math.PI * Math.random())
-  );
-}
-
-/**
- * Two-sample t test (equal variances), two-tailed p-value.
- */
-export function twoSampleP(
-  groupA: number[],
-  groupB: number[]
-): { t: number; df: number; p: number } {
-  const n1 = groupA.length;
-  const n2 = groupB.length;
-  const df = n1 + n2 - 2;
-
-  const m1 = mean(groupA);
-  const m2 = mean(groupB);
-  const v1 = sampleVariance(groupA);
-  const v2 = sampleVariance(groupB);
-
-  const pooled = ((n1 - 1) * v1 + (n2 - 1) * v2) / df;
-  const se = Math.sqrt(pooled * (1 / n1 + 1 / n2));
-
-  const t = (m1 - m2) / se;
-  const p = 2 * (1 - tCdf(Math.abs(t), df)); // two-sided
-
-  return { t, df, p };
+  const t = z + g + 0.5;
+  return 0.5 * Math.log(2 * Math.PI) + (z + 0.5) * Math.log(t) - t + Math.log(x);
 }
