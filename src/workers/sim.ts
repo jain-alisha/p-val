@@ -1,5 +1,4 @@
 /// <reference lib="webworker" />
-
 import { tTestTwoSample, randomNormal } from "../utils/stats";
 
 type InMsg = { delta: number; sigma: number; n: number; trials: number };
